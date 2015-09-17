@@ -1,0 +1,127 @@
+--- php_mssql.h.orig	2014-11-12 07:52:21.000000000 -0600
++++ php_mssql.h	2015-02-02 14:31:59.555567980 -0600
+@@ -173,6 +173,7 @@
+ 	HashTable *resource_list, *resource_plist;
+ 	zend_bool secure_connection;
+ 	long max_procs;
++	long guidconvert;
+ ZEND_END_MODULE_GLOBALS(mssql)
+ 
+ #define MSSQL_ROWS_BLOCK 128
+dsteckbeck@biwks007:~/work/apache-php$ cat php.php_mssql.c.patch 
+--- php_mssql.c	2014-11-12 07:52:21.000000000 -0600
++++ php_mssql.c	2015-02-02 14:50:07.532556036 -0600
+@@ -260,6 +260,7 @@
+ #ifdef HAVE_FREETDS
+ 	STD_PHP_INI_ENTRY("mssql.charset",					"",		PHP_INI_ALL,	OnUpdateString,	charset,			zend_mssql_globals,		mssql_globals)
+ #endif
++STD_PHP_INI_ENTRY("mssql.guidconvert",       "0",  PHP_INI_ALL,   OnUpdateLong,  guidconvert,         zend_mssql_globals,     mssql_globals)
+ PHP_INI_END()
+ /* }}} */
+ 
+@@ -769,7 +770,7 @@
+ 				dbfreelogin(mssql.login);
+ 				RETURN_FALSE;
+ 			}
+-			link = (int) index_ptr->ptr;
++			link = (int)(long) index_ptr->ptr;
+ 			ptr = zend_list_find(link,&type);   /* check if the link is still there */
+ 			if (ptr && (type==le_link || type==le_plink)) {
+ 				zend_list_addref(link);
+@@ -954,11 +955,11 @@
+ 			char *data = charcol(offset);
+ 
+ 			length=dbdatlen(mssql_ptr->link,offset);
+-#if ilia_0
++/*#if ilia_0*/
+ 			while (length>0 && data[length-1] == ' ') { /* nuke trailing whitespace */
+ 				length--;
+ 			}
+-#endif
++/*#endif*/
+ 			ZVAL_STRINGL(result, data, length, 1); 
+ 			break;
+ 		}
+@@ -981,11 +982,70 @@
+ #else
+ 		case 36: {			/* FreeTDS hack */
+ #endif
+-			char *data = charcol(offset);
++			if (MS_SQL_G(guidconvert) == 1) { // then convert to 36-hexdash string
++				int length;
++				char *data = charcol(offset);
++				length=dbdatlen(mssql_ptr->link,offset);
++				char buffer[32+1];
++				char buffer2[36+1];
++	  
++				dbconvert(NULL, SQLBINARY, (BYTE*) data, MIN(16, length), SQLCHAR, buffer, -1);
++	  
++				int i;
++	  
++				/* FIXME this works only on little endian machine */
++	  
++				for (i=0; i<4; i++) {
++					buffer2[2*i] = buffer[6-2*i];
++					buffer2[2*i+1] = buffer[7-2*i];
++				}
++				buffer2[8] = '-';
++				for (i=0; i<2; i++) {
++					buffer2[9+2*i] = buffer[10-2*i];
++					buffer2[10+2*i] = buffer[11-2*i];
++				}
++				buffer2[13] = '-';
++				for (i=0; i<2; i++) {
++					buffer2[14+2*i] = buffer[14-2*i];
++					buffer2[15+2*i] = buffer[15-2*i];
++				}
++				buffer2[18] = '-';
++				for (i=0; i<4; i++) {
++					buffer2[19+i] = buffer[16+i];
++				}
++				buffer2[23] = '-';
++				for (i=0; i<12; i++) {
++					buffer2[24+i] = buffer[20+i];
++				}
++				buffer2[36] = 0;
++
++				php_strtoupper(buffer2, 36);
+ 
+-			/* uniqueidentifier is a 16-byte binary number */
+-			ZVAL_STRINGL(result, data, 16, 1);
++				Z_STRVAL_P(result) = estrndup(buffer2, 36);
++				Z_STRLEN_P(result) = 36;
++				Z_TYPE_P(result)   = IS_STRING;
++			} else if(MS_SQL_G(guidconvert) == 2) { // convert to a 32-hex string
++				char *data = charcol(offset);
++				char tmp[255] = { '\0' };
++				int i         = 0;
++				int length    = 0;
++				for(i = 0; i < 16; i ++)
++				{
++						int value = (int)data[i];
++						if(value < 0)
++							value += 256;
++						sprintf(tmp + strlen(tmp), "%02x", value);
++					}
++					length = strlen(tmp);
++					Z_STRVAL_P(result) = estrndup(tmp, length);
++					Z_STRLEN_P(result) = length;
++					Z_TYPE_P(result)   = IS_STRING;
++			} else { // then do the default behavior
++				char *data = charcol(offset);
++				/* uniqueidentifier is a 16-byte binary number */
++				ZVAL_STRINGL(result, data, 16, 1);
+ 			}
++		}
+ 			break;
+ 		case SQLVARBINARY:
+ 		case SQLBINARY:
+@@ -1122,7 +1182,7 @@
+ 			}
+ 			
+ 			res_length = 19;
+-			spprintf(&res_buf, 0, "%d-%02d-%02d %02d:%02d:%02d" , dateinfo.year, dateinfo.month, dateinfo.day, dateinfo.hour, dateinfo.minute, dateinfo.second);
++			spprintf((char **)&res_buf, 0, "%d-%02d-%02d %02d:%02d:%02d" , dateinfo.year, dateinfo.month, dateinfo.day, dateinfo.hour, dateinfo.minute, dateinfo.second);
+ 		}
+ 
+ 		ZVAL_STRINGL(result, res_buf, res_length, 0);
