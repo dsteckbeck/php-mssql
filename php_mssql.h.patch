@@ -1,0 +1,10 @@
+--- php_mssql.h.orig	2014-11-12 07:52:21.000000000 -0600
++++ php_mssql.h	2015-02-02 14:31:59.555567980 -0600
+@@ -173,6 +173,7 @@
+ 	HashTable *resource_list, *resource_plist;
+ 	zend_bool secure_connection;
+ 	long max_procs;
++	long guidconvert;
+ ZEND_END_MODULE_GLOBALS(mssql)
+ 
+ #define MSSQL_ROWS_BLOCK 128
